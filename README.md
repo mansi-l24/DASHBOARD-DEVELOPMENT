@@ -12,7 +12,7 @@ DURATION : 4 WEEKS
 
 MENTOR : Neela Santhosh
 
-**DESCRIPTIPN**
+**DESCRIPTION**
 Features:
 
 Makes Up Sales Data: If you don't have real sales data, it can create some fake numbers for regions, product types, and months so you can see how the charts work.
