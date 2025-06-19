@@ -22,3 +22,6 @@ Draws Line/Area Chart: Plots sales over each month, so you can spot trends (like
 Stylish Look: Uses dark colors for the background and bright purple for the charts, making it visually appealing.
 Easy-to-Read Numbers: Automatically formats big sales numbers into "K" (thousands) or "M" (millions) so they're easier to read on the charts.
 Static Picture: It creates a picture of these charts. You can't click on them or interact with them like a real online dashboard, but it's great for sharing in a presentation.
+
+**OUTPUT**
+![Image](https://github.com/user-attachments/assets/7106b1c5-8734-415e-9c26-e2ffe4c7bdd5)
