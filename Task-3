@@ -1,0 +1,189 @@
+import os
+import pandas as pd
+import numpy as np
+import time
+
+# Dask imports
+import dask.dataframe as dd
+from dask.distributed import Client, LocalCluster
+
+# Visualization imports
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Dash imports
+import dash
+from dash import dcc, html, Input, Output
+import dash_bootstrap_components as dbc # Ensure you've installed this: pip install dash-bootstrap-components
+
+# --- Configuration for Dataset Generation and Dask ---
+OUTPUT_CSV_FILE = "large_transaction_data.csv" # This is for the Dask example's large file
+NUM_ROWS_DASK_GEN = 5_000_000 # Number of rows for the dummy Dask dataset
+
+# Dask configuration
+DASK_N_WORKERS = 4
+DASK_THREADS_PER_WORKER = 1 # Recommended for robustness on Windows
+DASK_MEMORY_LIMIT = '4GB'
+
+# --- 1. Data Generation Function (for the large Dask file) ---
+def generate_large_csv(filename, num_rows):
+    """Generates a large CSV file with dummy transaction data for Dask."""
+    print(f"Generating {num_rows:,} rows of dummy data for '{filename}'...")
+    start_time = time.time()
+
+    products = ["Laptop", "Monitor", "Keyboard", "Mouse", "Webcam", "Headphones", "Microphone", "Speaker"]
+    regions = ["North", "South", "East", "West", "Central"]
+    customers = [f"Customer_{i}" for i in range(500)]
+
+    chunk_size = 100_000
+    if num_rows < chunk_size:
+        chunk_size = num_rows
+
+    with open(filename, 'w') as f:
+        header = "TransactionID,CustomerID,ProductID,Region,Quantity,UnitPrice,TransactionTimestamp"
+        f.write(header + "\n")
+
+        for i in range(0, num_rows, chunk_size):
+            current_num_rows = min(chunk_size, num_rows - i)
+            data = {
+                "TransactionID": np.arange(i + 1, i + current_num_rows + 1),
+                "CustomerID": np.random.choice(customers, current_num_rows),
+                "ProductID": np.random.choice(products, current_num_rows),
+                "Region": np.random.choice(regions, current_num_rows),
+                "Quantity": np.random.randint(1, 10, current_num_rows),
+                "UnitPrice": np.round(np.random.uniform(10.0, 500.0, current_num_rows), 2),
+                "TransactionTimestamp": pd.to_datetime(pd.to_datetime('2023-01-01') + pd.to_timedelta(np.random.randint(0, 365*24*60*60, current_num_rows), unit='s'))
+            }
+            chunk_df = pd.DataFrame(data)
+            chunk_df.to_csv(f, header=False, index=False, mode='a')
+            if (i // chunk_size) % 10 == 0:
+                print(f"  Generated {i + current_num_rows:,} rows...", end='\r')
+    end_time = time.time()
+    print(f"\nFinished generating data in {end_time - start_time:.2f} seconds. File size: {os.path.getsize(filename)/(1024*1024):.2f} MB")
+
+# --- Main execution block (crucial for Windows multiprocessing) ---
+if __name__ == '__main__':
+    # Initialize Dask client and cluster variables
+    cluster = None
+    client = None
+
+    try:
+        # --- Initialize Dask Client (for large-scale data processing if needed) ---
+        print("\n--- Initializing Dask Client ---")
+        cluster = LocalCluster(n_workers=DASK_N_WORKERS,
+                               threads_per_worker=DASK_THREADS_PER_WORKER,
+                               memory_limit=DASK_MEMORY_LIMIT,
+                               processes=True)
+        client = Client(cluster)
+        print(f"Dask Client created. Dashboard link: {client.dashboard_link}")
+        print(f"Using {len(client.scheduler_info()['workers'])} workers.")
+
+        # Generate large dummy data for Dask if it doesn't exist
+        if not os.path.exists(OUTPUT_CSV_FILE):
+            generate_large_csv(OUTPUT_CSV_FILE, NUM_ROWS_DASK_GEN)
+        else:
+            print(f"'{OUTPUT_CSV_FILE}' already exists. Skipping large data generation.")
+
+        # Load large data into Dask DataFrame (example for scalable operations)
+        print(f"\n--- Loading '{OUTPUT_CSV_FILE}' into Dask DataFrame for Scalability Demo ---")
+        dask_df = dd.read_csv(OUTPUT_CSV_FILE,
+                              parse_dates=['TransactionTimestamp'],
+                              blocksize='64MB')
+        print(f"Dask DataFrame loaded with {dask_df.npartitions} partitions.")
+        print(f"Total rows in Dask DataFrame (computed): {len(dask_df):,}")
+
+        # --- Dask Scalability Demonstration (example operations) ---
+        print("\n--- Demonstrating Dask Scalability (e.g., complex aggregation) ---")
+        print("Calculating Average Quantity Sold per Product, Region, and Month...")
+        start_time = time.time()
+        monthly_product_region_avg = dask_df.assign(TransactionMonth=dask_df['TransactionTimestamp'].dt.month) \
+                                              .groupby(["ProductID", "Region", "TransactionMonth"])['Quantity'].mean()
+        dask_result = monthly_product_region_avg.compute().reset_index()
+        end_time = time.time()
+        print(f"Time taken for complex Dask aggregation on {NUM_ROWS_DASK_GEN:,} rows: {end_time - start_time:.2f} seconds")
+        print("First 5 rows of Dask Aggregation Result:")
+        print(dask_result.head())
+
+        # --- Pandas for smaller-scale data (for the Dash app) ---
+        print("\n--- Loading 'sales_data.csv' for Dash Application ---")
+        try:
+            # This is the file for your Dash app, ensure it's in the same directory!
+            df = pd.read_csv("sales_data.csv", parse_dates=["Date"])
+            print("sales_data.csv loaded successfully for Dash app.")
+            print("First 5 rows of Dash DataFrame:")
+            print(df.head())
+        except FileNotFoundError:
+            print("ERROR: 'sales_data.csv' not found. Please create it in the same directory as t3.py.")
+            print("Refer to previous instructions for dummy file content and creation.")
+            exit() # Exit if the critical file for Dash isn't found
+
+        # --- Dash Application Setup ---
+        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+
+        # Example: Simple Dash Layout
+        app.layout = dbc.Container([
+            html.H1("Sales Dashboard", className="text-center my-4"),
+            dbc.Row([
+                dbc.Col(dbc.Card(
+                    dbc.CardBody([
+                        html.H5("Total Revenue", className="card-title"),
+                        html.P(f"${df['Revenue'].sum():,.2f}", className="card-text fs-3")
+                    ]), className="text-center m-2"
+                ), width=6),
+                dbc.Col(dbc.Card(
+                    dbc.CardBody([
+                        html.H5("Total Units Sold", className="card-title"),
+                        html.P(f"{df['UnitsSold'].sum():,}", className="card-text fs-3")
+                    ]), className="text-center m-2"
+                ), width=6)
+            ]),
+            dbc.Row([
+                dbc.Col(dcc.Graph(
+                    id='sales-by-region-bar',
+                    figure={
+                        'data': [
+                            {'x': df.groupby('Region')['Revenue'].sum().index,
+                             'y': df.groupby('Region')['Revenue'].sum().values,
+                             'type': 'bar', 'name': 'Revenue'}
+                        ],
+                        'layout': {
+                            'title': 'Revenue by Region',
+                            'xaxis': {'title': 'Region'},
+                            'yaxis': {'title': 'Total Revenue ($)'}
+                        }
+                    }
+                ), width=6),
+                dbc.Col(dcc.Graph(
+                    id='product-sales-pie',
+                    figure={
+                        'data': [
+                            {'labels': df.groupby('Product')['Revenue'].sum().index,
+                             'values': df.groupby('Product')['Revenue'].sum().values,
+                             'type': 'pie', 'name': 'Products'}
+                        ],
+                        'layout': {
+                            'title': 'Revenue by Product'
+                        }
+                    }
+                ), width=6)
+            ])
+        ])
+
+        # --- Run the Dash Application ---
+        print("\n--- Running Dash Application ---")
+        print("Open your web browser and go to the URL printed below (e.g., http://127.0.0.1:8050/)")
+        app.run(debug=True) # THIS IS THE CORRECTED LINE!
+
+    except Exception as e:
+        print(f"\nAn error occurred during execution: {e}")
+        import traceback
+        traceback.print_exc() # Print full traceback for detailed error info
+    finally:
+        # --- Close Dask Client and Cluster (Crucial for cleanup) ---
+        if client:
+            client.close()
+            print("\nDask Client closed.")
+        if cluster:
+            cluster.close()
+            print("Dask LocalCluster closed.")
+        print("\nProgram finished (Dask resources cleaned up).")
